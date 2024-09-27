@@ -1,0 +1,387 @@
+<!DOCTYPE html>
+<html lang="uz">
+<head>
+	<link rel="icon" href="{{ url_for('static', filename='favicon.ico') }}" type="image/x-icon">
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>O'quvchilar Ro'yxati</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.16.9/xlsx.full.min.js"></script>
+    <style>
+        body {
+            font-family: 'Arial', sans-serif;
+            background-color: #e9ecef;
+            margin: 0;
+            padding: 20px;
+        }
+        h1 {
+            text-align: center;
+            color: #4a4a4a;
+            margin-bottom: 20px;
+        }
+        .date-time {
+            text-align: center;
+            margin-bottom: 20px;
+            font-weight: bold;
+            font-size: 18px;
+            color: #6c757d;
+        }
+        .class-section, .management-section {
+            background-color: #ffffff;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+            margin: 20px 0;
+            padding: 20px;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 15px;
+        }
+        th, td {
+            border: 1px solid #ced4da;
+            padding: 10px;
+            text-align: left;
+        }
+        th {
+            background-color: #007bff;
+            color: white;
+        }
+        .button-container {
+            margin: 10px 0;
+            display: flex;
+            flex-direction: column;
+        }
+        button {
+            color: white;
+            border: none;
+            border-radius: 5px;
+            padding: 10px 15px;
+            cursor: pointer;
+            transition: background-color 0.3s;
+            margin-bottom: 10px;
+        }
+        .save-btn { background-color: #28a745; }
+        .refresh-btn { background-color: #ffc107; }
+        .delete-btn { background-color: #dc3545; }
+        .import-btn { background-color: #6c757d; }
+        button:hover { opacity: 0.8; }
+        select {
+            margin-bottom: 15px;
+            width: 100%;
+            padding: 10px;
+            border-radius: 5px;
+            border: 1px solid #ced4da;
+        }
+        .absent-name {
+            color: red;
+        }
+        .justified-name {
+            color: blue;
+        }
+        .justified-row td:nth-child(3) {
+            color: blue;
+        }
+
+        /* Media query: kichik ekranlar uchun */
+        @media (max-width: 600px) {
+            .button-container {
+                flex-direction: column;
+                align-items: stretch;
+            }
+            button {
+                margin-bottom: 5px;
+            }
+            .class-section, .management-section {
+                padding: 15px;
+            }
+            th, td {
+                padding: 8px;
+            }
+            .date-time {
+                font-size: 16px;
+            }
+        }
+    </style>
+</head>
+<body>
+
+<h1>O'quvchilar Ro'yxati</h1>
+<div class="date-time" id="dateTime"></div>
+
+<div class="management-section">
+    <h2>Rahbariyat Uchun</h2>
+    <h3>Kelmagan O'quchilar Ro'yxati <span id="totalAbsentCount"></span></h3>
+    <div id="managementAbsentList"></div>
+    <h3>Sababli O'quchilar Ro'yxati <span id="totalJustifiedCount"></span></h3>
+    <div id="managementJustifiedList"></div>
+</div>
+
+<div class="class-section">
+    <h2>Sinf Tanlang</h2>
+    <select id="classSelect" onchange="selectClass()">
+        <option value="">Sinf tanlang</option>
+    </select>
+</div>
+
+<div id="classSections"></div>
+
+<script>
+    const classes = ['5-A', '5-B', '5-D', '6-A', '6-B', '6-D', '7-A', '7-B', '7-D', '8-A', '8-B', '9-A', '9-B', '9-D', '9-E', '10-A', '10-B', '11-A', '11-B', '11-D'];
+    const students = {};
+
+    classes.forEach(className => {
+        students[className] = JSON.parse(localStorage.getItem(`students_${className}`)) || [];
+        const classSelect = document.getElementById('classSelect');
+        classSelect.innerHTML += `<option value="${className}">${className} Sinfi</option>`;
+    });
+
+    function selectClass() {
+        const selectedClass = document.getElementById('classSelect').value;
+        if (selectedClass) {
+            document.getElementById('classSections').innerHTML = createClassSection(selectedClass);
+            loadList(selectedClass);
+            refreshAbsentLists(selectedClass);
+            refreshManagementLists();
+        }
+    }
+
+    function createClassSection(className) {
+        return `
+        <div class="class-section" id="class${className}">
+            <h2>${className} Sinf O'quvchilari Ro'yxati</h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Tartib raqami</th>
+                        <th>O'quvchining ismi va familiyasi</th>
+                        <th>Darsda</th>
+                        <th>Uy manzili</th>
+                        <th>Telefon raqami</th>
+                        <th>Amallar</th>
+                    </tr>
+                </thead>
+                <tbody id="studentList${className}"></tbody>
+            </table>
+            <div class="button-container">
+                <button class="save-btn" onclick="saveList('${className}')">Saqlash</button>
+                <button class="refresh-btn" onclick="refreshList('${className}')">Yangilash</button>
+                <input type="file" id="fileInput${className}" accept=".xlsx" style="display:none" onchange="importStudents('${className}')">
+                <button class="import-btn" onclick="document.getElementById('fileInput${className}').click()">Import</button>
+            </div>
+            <h3>Kelmagan O'quchilar Ro'yxati</h3>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Sinf</th>
+                        <th>Tartib raqami</th>
+                        <th>O'quvchining ismi va familiyasi</th>
+                        <th>Uy manzili</th>
+                        <th>Telefon raqami</th>
+                    </tr>
+                </thead>
+                <tbody id="absentList${className}"></tbody>
+            </table>
+            <h3>Sababli O'quchilar Ro'yxati</h3>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Sinf</th>
+                        <th>Tartib raqami</th>
+                        <th>O'quvchining ismi va familiyasi</th>
+                        <th>Uy manzili</th>
+                        <th>Telefon raqami</th>
+                    </tr>
+                </thead>
+                <tbody id="justifiedList${className}"></tbody>
+            </table>
+        </div>
+        `;
+    }
+
+    function updateStatus(select, className, index) {
+        const status = select.value;
+        students[className][index].status = status;
+        localStorage.setItem(`students_${className}`, JSON.stringify(students[className]));
+        loadList(className);
+        refreshAbsentLists(className);
+        refreshManagementLists();
+    }
+
+    function refreshManagementLists() {
+        const managementAbsentList = document.getElementById('managementAbsentList');
+        const managementJustifiedList = document.getElementById('managementJustifiedList');
+        managementAbsentList.innerHTML = '<table><thead><tr><th>Sinf</th><th>Tartib raqami</th><th>O\'quvchining ismi va familiyasi</th><th>Uy manzili</th><th>Telefon raqami</th></tr></thead><tbody id="managementAbsentBody"></tbody></table>';
+        managementJustifiedList.innerHTML = '<table><thead><tr><th>Sinf</th><th>Tartib raqami</th><th>O\'quvchining ismi va familiyasi</th><th>Uy manzili</th><th>Telefon raqami</th></tr></thead><tbody id="managementJustifiedBody"></tbody></table>';
+
+        const absentBody = document.getElementById('managementAbsentBody');
+        const justifiedBody = document.getElementById('managementJustifiedBody');
+
+        let totalAbsentCount = 0;
+        let totalJustifiedCount = 0;
+
+        classes.forEach(className => {
+            students[className].forEach((student, index) => {
+                if (student.status === 'yoq') {
+                    absentBody.innerHTML += `
+                        <tr class="absent-row">
+                            <td>${className}</td>
+                            <td>${index + 1}</td>
+                            <td class="absent-name">${student.name}</td>
+                            <td>${student.address}</td>
+                            <td>${student.phone}</td>
+                        </tr>
+                    `;
+                    totalAbsentCount++;
+                } else if (student.status === 'sababli') {
+                    justifiedBody.innerHTML += `
+                        <tr class="justified-row">
+                            <td>${className}</td>
+                            <td>${index + 1}</td>
+                            <td class="justified-name">${student.name}</td>
+                            <td>${student.address}</td>
+                            <td>${student.phone}</td>
+                        </tr>
+                    `;
+                    totalJustifiedCount++;
+                }
+            });
+        });
+
+        document.getElementById('totalAbsentCount').textContent = `(${totalAbsentCount})`;
+        document.getElementById('totalJustifiedCount').textContent = `(${totalJustifiedCount})`;
+    }
+
+    function loadList(className) {
+        const studentList = document.getElementById(`studentList${className}`);
+        studentList.innerHTML = '';
+        students[className].forEach((student, index) => {
+            studentList.innerHTML += `
+                <tr>
+                    <td>${index + 1}</td>
+                    <td>${student.name}</td>
+                    <td>
+                        <select onchange="updateStatus(this, '${className}', ${index})">
+                            <option value="bor" ${student.status === 'bor' ? 'selected' : ''}>Bor</option>
+                            <option value="yoq" ${student.status === 'yoq' ? 'selected' : ''}>Yo'q</option>
+                            <option value="sababli" ${student.status === 'sababli' ? 'selected' : ''}>Sababli</option>
+                        </select>
+                    </td>
+                    <td>${student.address}</td>
+                    <td>${student.phone}</td>
+                    <td>
+                        <button class="delete-btn" onclick="deleteStudent('${className}', ${index})">O'chirish</button>
+                    </td>
+                </tr>
+            `;
+        });
+        refreshJustifiedList(className);
+    }
+
+    function refreshJustifiedList(className) {
+        const justifiedList = document.getElementById(`justifiedList${className}`);
+        justifiedList.innerHTML = '';
+        students[className].forEach((student, index) => {
+            if (student.status === 'sababli') {
+                justifiedList.innerHTML += `
+                    <tr class="justified-row">
+                        <td>${className}</td>
+                        <td>${index + 1}</td>
+                        <td class="justified-name">${student.name}</td>
+                        <td>${student.address}</td>
+                        <td>${student.phone}</td>
+                    </tr>
+                `;
+            }
+        });
+    }
+
+    function refreshAbsentLists(className) {
+        const absentList = document.getElementById(`absentList${className}`);
+        absentList.innerHTML = '';
+        students[className].forEach((student, index) => {
+            if (student.status === 'yoq') {
+                absentList.innerHTML += `
+                    <tr>
+                        <td>${className}</td>
+                        <td>${index + 1}</td>
+                        <td class="absent-name">${student.name}</td>
+                        <td>${student.address}</td>
+                        <td>${student.phone}</td>
+                    </tr>
+                `;
+            }
+        });
+    }
+
+    function saveList(className) {
+        localStorage.setItem(`students_${className}`, JSON.stringify(students[className]));
+        alert(`${className} sinf o'quvchilari saqlandi!`);
+    }
+
+    function refreshList(className) {
+        students[className] = JSON.parse(localStorage.getItem(`students_${className}`)) || [];
+        
+        students[className].forEach(student => {
+            student.status = 'bor';
+        });
+        
+        loadList(className);
+        refreshAbsentLists(className);
+        refreshManagementLists();
+    }
+
+    function deleteStudent(className, index) {
+        students[className].splice(index, 1);
+        localStorage.setItem(`students_${className}`, JSON.stringify(students[className]));
+        loadList(className);
+        refreshAbsentLists(className);
+        refreshManagementLists();
+    }
+
+    function importStudents(className) {
+        const fileInput = document.getElementById(`fileInput${className}`);
+        const file = fileInput.files[0];
+        const reader = new FileReader();
+        reader.onload = function (e) {
+            const data = new Uint8Array(e.target.result);
+            const workbook = XLSX.read(data, { type: 'array' });
+            const firstSheetName = workbook.SheetNames[0];
+            const worksheet = workbook.Sheets[firstSheetName];
+            const json = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+            
+            // Import qilingan jadvalni to'liq saqlash
+            json.forEach((row) => {
+                const name = row[0] || '';
+                if (name) {
+                    const existingStudentIndex = students[className].findIndex(student => student.name === name);
+                    // Faqat yangi o'quvchilarni qo'shish
+                    if (existingStudentIndex === -1) {
+                        students[className].push({
+                            name: row[0],
+                            address: row[1] || '',
+                            phone: row[2] || '',
+                            status: 'bor'
+                        });
+                    }
+                }
+            });
+            
+            // Butunlay jildni saqlash
+            localStorage.setItem(`students_${className}`, JSON.stringify(students[className]));
+            
+            // Sinf ro'yxatini yangilash
+            loadList(className);
+            refreshManagementLists();
+        };
+        reader.readAsArrayBuffer(file);
+    }
+
+    function updateDateTime() {
+        const now = new Date();
+        const options = { year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false };
+        document.getElementById('dateTime').textContent = now.toLocaleString('uz-UZ', options);
+    }
+    setInterval(updateDateTime, 1000);
+</script>
+</body>
+</html>
